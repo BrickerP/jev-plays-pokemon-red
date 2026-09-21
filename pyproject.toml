@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Pokemon Red on PyBoy where a decision model picks at the branches"
 requires-python = ">=3.12,<3.14"
 license = { text = "MIT" }
-dependencies = ["pyboy>=2.2", "pygame>=2.6"]
+dependencies = ["pyboy>=2.2", "pygame>=2.6", "pillow>=10"]
 
 [project.scripts]
 jpp = "jpp.cli:main"

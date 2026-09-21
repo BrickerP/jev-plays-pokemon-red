@@ -40,6 +40,26 @@ NUMBER = (210, 126, 153)
 ACCENT = (255, 160, 102)
 BAR = (58, 62, 84)
 
+# The overlay is the only window when `--overlay` is on, so takeover keys live here.
+# Z/X match VBA; WASD is the other habit. A is left on WASD, never the A button.
+PAD_KEYS = {
+    pygame.K_UP: "up",
+    pygame.K_DOWN: "down",
+    pygame.K_LEFT: "left",
+    pygame.K_RIGHT: "right",
+    pygame.K_w: "up",
+    pygame.K_s: "down",
+    pygame.K_a: "left",
+    pygame.K_d: "right",
+    pygame.K_z: "a",
+    pygame.K_j: "a",
+    pygame.K_x: "b",
+    pygame.K_k: "b",
+    pygame.K_BACKSPACE: "b",
+    pygame.K_RETURN: "start",
+    pygame.K_KP_ENTER: "start",
+}
+
 
 def _font(size, bold=False):
     return pygame.font.SysFont("Menlo,Monaco,monospace", size, bold=bold)
@@ -93,12 +113,13 @@ def fit(font, text: str, width: int) -> str:
 
 
 class Overlay:
-    def __init__(self, caption="jev plays pokemon", live=True):
+    def __init__(self, caption="jev plays pokemon", live=True, fps=60):
         pygame.init()
         pygame.display.set_caption(caption)
         self.screen = pygame.display.set_mode((W, H))
         self.clock = pygame.time.Clock()
         self.live = live
+        self.fps = fps
         self.mono = _font(15)
         self.small = _sans(20)
         self.head = _sans(34, bold=True)
@@ -113,10 +134,37 @@ class Overlay:
         self.changed_at = 0.0
         self.now = None  # set by render_frames to walk a fake clock
         self.record = None
+        self.live_state = None
+        self.live_lines: list[str] = []
         self.latencies: list[float] = []
         self.decisions = 0
         self.tokens = 0
         self.labelled: list[tuple[float, int]] = []
+        self.manual = False  # Tab toggled; stays until Tab again
+        self.forced = False  # naming screen: pause the agent without a key
+        self.pending: list[str] = []
+
+    @property
+    def taking_over(self) -> bool:
+        return self.manual or self.forced
+
+    def take_pending(self) -> list[str]:
+        held, self.pending = self.pending, []
+        return held
+
+    def set_live(self, state):
+        """Keep the debug panel filled between Jev calls, when there are no bars yet."""
+        self.live_state = state
+        party = getattr(state, "party", ()) or ()
+        battle = getattr(getattr(state, "battle", None), "kind", "none")
+        self.live_lines = [
+            f"{state.map_name}  ({state.x},{state.y})  battle={battle}  party={len(party)}",
+            (
+                f"last Jev  {pretty(self.record['choice'])}"
+                if self.record
+                else "Jev idle  code is walking / pressing A until a real branch"
+            ),
+        ]
 
     def _clock(self) -> float:
         return time.monotonic() if self.now is None else self.now
@@ -153,6 +201,14 @@ class Overlay:
                 and event.key in (pygame.K_ESCAPE, pygame.K_q)
             ):
                 return False
+            if event.type != pygame.KEYDOWN:
+                continue
+            if event.key == pygame.K_TAB:
+                self.manual = not self.manual
+            elif self.taking_over:
+                button = PAD_KEYS.get(event.key)
+                if button:
+                    self.pending.append(button)
         self.screen.fill(BG)
         self._draw_header()
         self._draw_feed(frame)
@@ -161,16 +217,18 @@ class Overlay:
             self._draw_bars()
             self._draw_nouls()
             self._draw_state()
+        else:
+            self._draw_live()
         self._draw_ticker()
         pygame.display.flip()
         if self.now is None:
-            self.clock.tick(60)
+            self.clock.tick(self.fps)
         return True
 
     def _draw_header(self):
         self.screen.blit(self.head.render("JEV PLAYS POKEMON", True, FG), (MARGIN, 38))
-        badge = "LIVE" if self.live else "REPLAY"
-        text = self.small.render(badge, True, MUTED)
+        badge = "YOU" if self.taking_over else ("LIVE" if self.live else "REPLAY")
+        text = self.small.render(badge, True, ACCENT if self.taking_over else MUTED)
         x = W - MARGIN - text.get_width()
         self.screen.blit(text, (x, 46))
         self._draw_pulse(x - 26, 56)
@@ -196,6 +254,32 @@ class Overlay:
                 self.screen.blit(
                     note, note.get_rect(center=(FEED.centerx, FEED.centery + i * 30))
                 )
+
+    def _draw_live(self):
+        """Map, tile, and why the bar panel is empty: no branch has been asked yet."""
+        self.screen.blit(self.small.render("LIVE", True, MUTED), (MARGIN, GOAL_Y + 6))
+        title = self.live_lines[0] if self.live_lines else "decoding…"
+        self.screen.blit(
+            self.goal_font.render(
+                fit(self.goal_font, title, W - 2 * MARGIN - 90), True, ACCENT
+            ),
+            (MARGIN + 90, GOAL_Y),
+        )
+        note = (
+            self.live_lines[1]
+            if len(self.live_lines) > 1
+            else "Jev idle  code is walking / pressing A until a real branch"
+        )
+        self.screen.blit(self.label.render(fit(self.label, note, W - 2 * MARGIN), True, FG), (MARGIN, BAR_TOP + 8))
+        hint = (
+            "YOU have the pad   arrows/WASD  Z=A  X=B  Enter=start  Tab=give back"
+            if self.taking_over
+            else "Tab takes the pad   naming screen pauses for you automatically"
+        )
+        self.screen.blit(
+            self.small.render(fit(self.small, hint, W - 2 * MARGIN), True, ACCENT if self.taking_over else MUTED),
+            (MARGIN, BAR_TOP + 56),
+        )
 
     def _draw_goal(self):
         goal = self.record["state"].get("goal", self.record["goal"])

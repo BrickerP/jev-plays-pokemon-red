@@ -1,107 +1,94 @@
 # jev-plays-pokemon-red
 
-Pokemon Red played by a model that only outputs probabilities. Code reads the Game Boy's
-memory into a typed snapshot and hands the model a menu of the moves that are actually
-legal; it returns a probability for each one. The bars are those probabilities.
+Pokemon Red played by [Jev](https://typesafe.ai), a model that only outputs probabilities.
 
-    uv run jpp play --rom /path/to/your/red.gb --overlay
+Code reads the Game Boy's RAM into a typed snapshot, works out which actions are legal
+right now, and hands the model that menu. Jev returns a probability for each option, and
+code presses the buttons. The bars in the overlay are those probabilities.
+
+> Copy of [valentynkit/jev-plays-pokemon-red](https://github.com/valentynkit/jev-plays-pokemon-red)
+> (MIT, © 2026 Valentyn Kit) with the setup simplified and four real-cartridge stalls
+> fixed. See [What this copy changes](#what-this-copy-changes). The clip below is the
+> original author's recording on his own cartridge.
 
 ![the overlay over a live rival battle](demo/overlay.gif)
 
-That is a real cartridge under PyBoy, not a mockup. The agent walks out of the bedroom,
-crosses Pallet Town, takes Charmander from Oak, and wins the rival battle without anyone
-touching a key.
+## What you need
 
-## The numbers, and what is still blank
+- Python 3.12 or 3.13, and [uv](https://docs.astral.sh/uv/)
+- A TypeSafe API key, the only secret this project uses
+- Your own legally obtained Pokemon Red dump. No game data is in this repo and none
+  will be added. `.gb` and `.gbc` both work; PyBoy reads the header, not the extension.
 
-Measured over the calls that were answered on a cartridge, through the Vercel AI Gateway
-shim rather than the direct API:
+## Where the API key goes
 
-```
-479  496  563  679  867  1470 ms      median 621, mean 759 (n=6)
-about 1.3 decisions/sec, $0.14/hour at ~725 input tokens a call
-```
-
-Calibration is **not** published yet, on purpose. The endpoint's free tier serves about
-five calls per window, so the longest labelled run so far is n=5 turns with a confidence
-interval that covers everything, including the constant predictor. A Brier score on that
-sample would be decoration. `uv run measure` prints whatever the run actually supports, a
-bad number included, and says when there is nothing to say.
-
-## Why
-
-Claude Plays Pokemon is a large model deliberating tens of seconds a move. This answers a
-closed-set question in under a second, so the emulator is the bottleneck instead of the
-model.
-
-The catch, up front: it cannot plan. It never sees more than the current decision. Every
-route, threshold and piece of arithmetic is ordinary Python, and the model only picks among
-actions the code already proved legal. It is also not asked often. Code handles the routine
-ticks and only calls Jev where the game actually branches. Between the bedroom and Oak's
-lab it is not asked anything at all.
-
-Here is the argument in two lines, from a real run:
-
-```
-"do you want the fire POKeMON, CHARMANDER?"   -> yes, 0.61
-"give a nickname to CHARMANDER?"              -> no,  0.58
+```sh
+cp .env.example .env     # then open .env and paste the key into TYPESAFE_API_KEY=
 ```
 
-No fixed button survives both. Yes is wrong for the nickname and no is wrong for the
-starter. The only thing separating them is the goal sentence in the state, which is the
-whole reason to ask at a branch rather than script one.
+`.env` is gitignored and loaded automatically. A real environment variable wins over the
+file, so `export TYPESAFE_API_KEY=...` also works and is what CI should do.
 
-Then it scores itself. Every battle turn carries a `faints_this_turn` noul, labelled from
-what the RAM says happened next, and `measure` prints the Brier beside the base rate and a
-constant predictor. If the model's confidence means nothing, the number says so.
+The free tier answers about five calls per rate-limit window. When it runs out the agent
+falls back to its own code default and the overlay prints
+`NO ANSWER: RATE LIMITED, CODE DEFAULT` over the bars. The run continues either way: Jev
+only ever makes this agent pickier, never looser.
 
-<p align="center">
-  <img src="demo/still-bars.png" width="420" alt="probability bars over the rival battle">
-  <img src="demo/still-payload.png" width="420" alt="the request body that produced them">
-</p>
+## Quick start
 
-## Speed and cost
-
-| | decisions/sec | $/hour | calibration published |
-|---|---|---|---|
-| this repo | ~1.3 (n=6, call latency, via gateway shim) | ~0.14 | not yet, sample too small |
-| `milanboers/jev-plays-pokemon` | not run | not run | no |
-| Claude Plays Pokemon | not published | not published | no |
-
-Units matter more than the numbers: we ask once per branch, the incumbent asks once per
-turn over eight action nouls plus a goal choice. `docs/comparison.md` has the details.
-
-## Install
-
-```
+```sh
 uv sync
-cp .env.example .env
+cp .env.example .env                                  # paste your key
+export POKEMON_ROM=/path/to/your/red.gb               # or pass --rom every time
 ```
 
-| variable | required | purpose |
-|---|---|---|
-| `POKEMON_ROM` | to play | path to your own Pokemon Red dump |
-| `TYPESAFE_API_KEY` | to call real Jev | direct API auth |
-| `JEV_BASE_URL` | no | point at a gateway shim, a recording proxy, or the local fake |
+**Watch a battle.** Two commands, and only the second one spends any credit:
 
-Bring your own ROM. This repo contains no game data and will not help you find any. Save
-states hold copyrighted memory, so they stay out of git.
-
-## Use
-
-```
-uv run python fixtures/make_state.py red-bedroom.state    # drive the intro, headless
-uv run jpp play --rom red.gb --state red-bedroom.state --headless --max-decisions 50
-uv run jpp play --rom red.gb --state red-bedroom.state --frames /tmp/clip --every 2
-uv run jpp probe --rom red.gb                             # watch the decoded state
-uv run jpp state --ram fixtures/ram_battle.bin            # the exact request body
-uv run jpp overlay --replay fixtures/runs/sample.jsonl    # the window, no ROM needed
-uv run measure runs/run.jsonl                             # the headline numbers
+```sh
+uv run python fixtures/make_battle_state.py red-battle.state
+uv run jpp play --rom "$POKEMON_ROM" --state red-battle.state --overlay --linger 3
 ```
 
-`--frames` draws the overlay over the running emulator and writes a PNG per frame, which is
-how the clip above was recorded. No screen recorder, no cursor, exact length.
-`demo/README.md` has the ffmpeg lines.
+The first drives the whole opening headless with no key and no network: out of the
+bedroom, across Pallet Town, Charmander from Oak, nickname declined, out of the lab, and
+it saves the frame the rival battle menu is ready. Well under a minute. The second opens
+the window already in that battle, so the bars are there from the first turn. `--linger 3`
+holds each answer for three seconds so you can read it.
+
+**Watch the whole run instead**, from Red's bedroom:
+
+```sh
+uv run python fixtures/make_state.py red-bedroom.state
+uv run jpp play --rom "$POKEMON_ROM" --state red-bedroom.state --overlay
+```
+
+Expect a quiet start: from the bedroom to the lab, code walks and Jev is asked nothing,
+so the panel shows the live map instead of bars. Both save states are gitignored.
+
+**No key?** Add `--no-jev` to either play command. The game still plays, from code
+defaults only, and loses the rival battle.
+
+**No ROM?** Replay the recorded run that ships with the repo:
+
+```sh
+uv run jpp overlay --replay fixtures/runs/sample.jsonl
+```
+
+## Controls
+
+The overlay owns the window, so it owns the keyboard too.
+
+| Key | Action |
+|---|---|
+| `Tab` | Take the controller, or give it back |
+| Arrows or WASD | D-pad |
+| `Z` or `J` | A |
+| `X`, `K` or Backspace | B |
+| `Enter` | Start |
+| `Esc` or `Q` | Quit |
+
+If nothing moves while you hold the pad, a text box is waiting: press `Z`. The game masks
+the d-pad during scripted dialogue, and that is the game doing it, not the agent.
 
 ## How it works
 
@@ -120,73 +107,70 @@ PyBoy --ram bytes--> decode.py --> GameState --> goals.py (active goal)
                                                  overlay.py + runs/*.jsonl
 ```
 
-| goal | done when |
-|---|---|
-| `leave_house` | `wCurMap` is neither house map |
-| `get_starter` | `wPartyCount >= 1` and `EVENT_GOT_STARTER` |
-| `win_lab_rival` | `EVENT_BATTLED_RIVAL_IN_OAKS_LAB`, and the latched `wBattleResult` is a win |
-| `reach_viridian` | `wCurMap == $01` |
+Code owns the goal stack, the route, and every piece of arithmetic. Jev is asked only
+where the game actually branches, and only ever to pick from options code already proved
+legal, so it cannot name a button that does not exist. Every failure path falls back to
+the no-Jev behaviour.
 
-Addresses come from walking pret/pokered's `ram/wram.asm` from the WRAM0 origin and summing
-the struct macros, not from copying hex. Nine of them match independently published values
-byte for byte, which is what makes the rest of the table trustworthy.
+## What this copy changes
 
-### What the cartridge changed
+All four of these only show up on a real cartridge, which is why the upstream test suite
+(synthetic RAM, no ROM) is green without them:
 
-Nothing here was caught by tests over synthetic RAM, because the fakes are too tidy:
+- **The naming screen was never recognised.** Its fingerprint pinned `wTopMenuItemY/X`,
+  which are the cursor's own row and column, not the panel's origin: read off a cartridge
+  the X goes 1, 3, then 15 as the cursor walks the grid. The agent sat on the keyboard
+  typing `AAAAAA` and never submitted.
+- **START was swallowed while a modal menu was up.** Oak's speech leaves `wJoyIgnore`
+  masking START and the d-pad and nothing clears it, so the submit never landed. The
+  overlay already did this clear for a human taking the pad; the agent needs it too.
+- **Translated cartridges could not get past the two lab prompts.** `yes_no_prompt` reads
+  the words YES and NO off the tilemap, which a translated ROM does not draw, so the
+  agent answered every prompt with a blind A: right for the starter, wrong for the
+  nickname, and into the keyboard. `screen.two_item_choice` now recognises a two-option
+  menu structurally (`wMaxMenuItem` 1, A and B watched), and when the question is not
+  readable code answers it rather than asking Jev to judge text it cannot see. An
+  English ROM still takes the readable path and still goes to Jev.
+- **Winning the rival battle stalled the run.** `reach_viridian` had no leg for Oak's lab,
+  and the rival intercepts at the door, so the goal flipped while the player was still
+  inside, `waypoint_for` returned `None`, and the loop pressed A forever. The lab leg is
+  back, and a mat on the map's bottom row is now left by walking south, because a battle
+  clears the heading the old code pushed through with.
 
-- `wTextBoxID` is not "a text box is open". It holds the last box's id and never clears, so
-  from the intro onward it reads 1 and the agent pressed A forever. `wFontLoaded` is the
-  byte that tracks it, and battle text does not set that one either, so a battle branch has
-  to wait for `wBattleMon` to be populated instead.
-- A walking step takes longer than one tick, so judging a step immediately read every
-  successful move as a wall and retired the axis.
-- `wMaxMenuItem` keeps the name list's 3 from the intro forever. No menu flag in RAM can be
-  trusted, which is why `screen.py` reads `wTileMap` and believes the words on screen.
-- The rival does not challenge on the spot; he intercepts on the way out of the lab.
+Setup, not behaviour: `pillow` is declared (the overlay needs `emu.screen`, PyBoy needs
+Pillow for it), `.env` is actually read, and `fixtures/make_battle_state.py` is new.
 
-## Known limits
-
-- One turn of lookahead. No strategy, no team building.
-- v0.1 targets Viridian City on a hardcoded route. Pallet Town's exit is measured and
-  works; Route 1 still walks into a ledge at `(10, 28)` and stops. One waypoint per map
-  cannot express a way around it, so that is the v0.2 occupancy map, not another
-  hand-picked tile.
-- Without Jev the code default loses the rival battle, so `win_lab_rival` never completes
-  and nothing downstream of it runs.
-- The RAM fixtures are synthetic, so the unit tests cannot catch a wrong address. The ROM
-  smoke test is what catches that, and it only runs locally.
-- Brier is on per-turn fainting. At v0.1's length and the current rate limit it is
-  preliminary, not a published calibration claim.
-- `fixtures/runs/sample.jsonl` is a fixture, not a playthrough: synthetic RAM, no emulator,
-  20 of its 40 rows real answers and the rest deterministic stand-ins tagged
-  `"source": "fake"`. `measure` excludes those and says how many there were. The overlay
-  refuses to draw them at all unless asked.
-- decisions/sec is call latency only. Playback pacing and rate-limit retries are kept out
-  of it, so `--demo` can never print itself as a measurement.
+The author's own measurements, the calibration discussion, and the design notes live
+upstream and are not reproduced here.
 
 ## Development
 
-```
-uv run pytest -q
-uv run python fixtures/make_ram.py      # regenerate the synthetic RAM fixtures
+```sh
+uv run pytest -q                       # 104 passed, 6 skipped. Offline, no key, no ROM.
+uv run python fixtures/make_ram.py     # regenerate the synthetic RAM fixtures
+uv run jpp probe --rom "$POKEMON_ROM"  # walk by hand, watch the decoded state
+uv run jpp state --ram fixtures/ram_battle.bin   # the exact request body for a branch
+uv run measure runs/run.jsonl          # Brier, decisions/sec and $/hour for a run
 ```
 
-Tests run offline against `fixtures/fake_jev.py` and the recorded answers in
-`fixtures/recorded/`. No key, no network, no ROM.
+The three ROM tests skip unless you point them at a cartridge:
 
-The ROM tests skip unless you point them at a cartridge:
-
-```
+```sh
 POKEMON_ROM=/path/to/red.gb uv run pytest tests/test_smoke_rom.py -q
-POKEMON_ROM=/path/to/red.gb uv run python fixtures/make_state.py red-bedroom.state
-POKEMON_STATE=$PWD/red-bedroom.state POKEMON_ROM=/path/to/red.gb uv run pytest -q
 ```
 
-`make_state.py` drives the new-game intro headless, which the smoke test used to need a
-human for. `probe` walks the route by hand while printing the decoded state, which is how
-the waypoints and the input-readiness predicate were settled.
+## Known limits
+
+- One turn of lookahead. No planning, no team building.
+- v0.1 targets Viridian City on a hand-written route. Route 1 walks into the ledge at
+  `(10, 28)` and stops: one waypoint per map cannot express a way around it.
+- A translated ROM gets through the two prompts on this route because code answers them.
+  Anything later that needs the text read is still English-only.
+- Without a key the code default loses the rival battle, so nothing downstream of it runs.
+- A full playthrough needs paid credits; the free tier is five calls a window.
 
 ## License
 
-MIT.
+MIT, see [LICENSE](LICENSE). Original work © 2026
+[Valentyn Kit](https://github.com/valentynkit); this copy keeps that notice, as the
+licence requires.

@@ -25,6 +25,32 @@ RECORD = {
 }
 
 
+def test_overlay_fps_caps_the_clock():
+    view = overlay.Overlay(fps=20)
+    assert view.fps == 20
+
+
+def test_live_status_fills_the_panel_before_any_jev_call():
+    from types import SimpleNamespace
+
+    view = overlay.Overlay()
+    try:
+        view.set_live(
+            SimpleNamespace(
+                map_name="PALLET_TOWN",
+                x=10,
+                y=12,
+                party=(),
+                battle=SimpleNamespace(kind="none"),
+            )
+        )
+        assert "PALLET_TOWN" in view.live_lines[0]
+        assert "Jev idle" in view.live_lines[1]
+        assert view.draw(None)
+    finally:
+        pygame.quit()
+
+
 def test_bars_animate_from_the_previous_values_to_the_new():
     view = overlay.Overlay()
     try:
@@ -127,5 +153,36 @@ def test_a_fallback_still_draws_its_options():
         assert set(view.target) == set(RECORD["options"])
         assert all(v == 0.0 for v in view.target.values())
         assert view.draw(None)
+    finally:
+        pygame.quit()
+
+
+def test_tab_takes_the_pad_and_queues_game_boy_buttons():
+    """The overlay owns the only window, so takeover has to live on its keyboard."""
+    view = overlay.Overlay()
+    try:
+        pygame.event.post(pygame.event.Event(pygame.KEYDOWN, {"key": pygame.K_z}))
+        assert view.draw(None)
+        assert view.take_pending() == []
+        pygame.event.post(pygame.event.Event(pygame.KEYDOWN, {"key": pygame.K_TAB}))
+        assert view.draw(None)
+        assert view.taking_over
+        pygame.event.post(pygame.event.Event(pygame.KEYDOWN, {"key": pygame.K_z}))
+        pygame.event.post(pygame.event.Event(pygame.KEYDOWN, {"key": pygame.K_RETURN}))
+        assert view.draw(None)
+        assert view.take_pending() == ["a", "start"]
+        assert view.take_pending() == []
+    finally:
+        pygame.quit()
+
+
+def test_the_naming_screen_forces_the_pad_without_a_tab():
+    view = overlay.Overlay()
+    try:
+        view.forced = True
+        pygame.event.post(pygame.event.Event(pygame.KEYDOWN, {"key": pygame.K_LEFT}))
+        assert view.draw(None)
+        assert view.taking_over
+        assert view.take_pending() == ["left"]
     finally:
         pygame.quit()

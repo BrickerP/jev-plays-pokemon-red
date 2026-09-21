@@ -22,6 +22,30 @@ MODEL = "jev-1.13.0"  # pinned: the Brier number is a published claim
 TIMEOUT_S = 8.0
 RETRY_STATUS = (429, 500, 502, 503, 504, 529)
 PRICE_PER_INPUT_TOKEN = 0.042 / 1e6
+ENV_FILE = ".env"
+
+
+def load_env_file(path=ENV_FILE) -> None:
+    """Fill missing environment variables from a `.env` beside the project.
+
+    `cp .env.example .env` is the documented way to hand this project a key, so it has
+    to be the way that works. Real environment variables win, so an explicit `export`
+    still overrides the file, and nothing is a dependency: a `KEY=value` file is a few
+    lines to read and `python-dotenv` would be the only runtime install this project
+    does not already need.
+    """
+    where = Path(path)
+    if not where.is_file():
+        return
+    for line in where.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key, value = key.strip(), value.strip().strip("'\"")
+        if key and value and key not in os.environ:
+            os.environ[key] = value
+
 
 CHOICE_INSTRUCTIONS = (
     "Given the goal and the state, which of these actions should the player take next? "
@@ -89,6 +113,7 @@ class JevClient:
         record_dir=None,
         retries=1,
     ):
+        load_env_file()
         self.base_url = (
             base_url or os.environ.get("JEV_BASE_URL") or DEFAULT_BASE_URL
         ).rstrip("/")

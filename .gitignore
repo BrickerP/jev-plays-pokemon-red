@@ -1,3 +1,4 @@
+.env
 *.gb
 *.gbc
 *.state
@@ -9,3 +10,13 @@ __pycache__/
 .venv/
 .pytest_cache/
 demo/*-draft.*
+
+CLAUDE.md
+CONTEXT.md
+REVIEW-*.md
+sessions/
+docs/research/
+docs/SHARED.md
+demo/post.md
+fixtures/run_sun_mock.py
+fixtures/run_jev_cases.py

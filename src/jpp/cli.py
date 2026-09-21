@@ -3,6 +3,7 @@
 import argparse
 import json
 import sys
+import time
 from pathlib import Path
 
 from . import goals, options, policy
@@ -92,11 +93,13 @@ def cmd_play(args):
         with open(args.state, "rb") as f:
             emu.load_state(f)
     client = policy.JevClient(replay_dir=args.replay)
-    on_decision, on_frame = None, None
+    on_decision, on_frame, human = None, None, None
     if args.frames:
         on_decision, on_frame = _frame_capture(Path(args.frames), args.every)
     elif args.overlay:
-        on_decision = _overlay_feed(emu)
+        on_decision, on_frame, human = _overlay_watch(
+            emu, fps=args.overlay_fps, linger_s=args.linger
+        )
     try:
         records = play(
             emu,
@@ -105,31 +108,52 @@ def cmd_play(args):
             log_path=log,
             on_decision=on_decision,
             on_frame=on_frame,
+            human=human,
         )
     finally:
         emu.stop(save=False)
     print(f"{len(records)} decisions -> {log}")
 
 
-def _overlay_feed(emu):
-    """The bars beside the game, one repaint per decision.
+def _overlay_watch(emu, fps=60, linger_s=0.0):
+    """One pygame window: the Game Boy frame on top, live debug / Jev bars below.
 
-    The overlay caps at 60 fps and the headline number is never taken here; the measure
-    line names the mode, CONTEXT section 5.
+    PyBoy cannot open its own SDL window at the same time. Decode every frame so the
+    panel is not black while the script is walking. The headline number is still call
+    latency, never this clock.
     """
+    from . import screen, symbols as S
+    from .decode import decode
     from .overlay import Overlay
 
-    overlay = Overlay("jev plays pokemon")
+    overlay = Overlay("jev plays pokemon", live=True, fps=fps)
     labelled: list[dict] = []
 
-    def feed(record):
+    def _paint():
+        overlay.set_live(decode(emu.memory))
+        if not overlay.draw(emu.screen.ndarray):
+            raise SystemExit("overlay closed")
+
+    def on_decision(record):
         from . import measure
 
         labelled.append(record)
         overlay.feed(record, labelled=measure.pairs(labelled))
-        overlay.draw(emu.screen.ndarray)
+        if linger_s <= 0:
+            _paint()
+            return
+        hold_until = time.monotonic() + linger_s
+        while time.monotonic() < hold_until:
+            _paint()
 
-    return feed
+    def on_frame(_emu):
+        overlay.forced = screen.naming_keyboard(emu.memory)
+        if overlay.taking_over and overlay.forced:
+            # leftover mask from Oak's speech ignores Start and the d-pad
+            emu.memory[S.JOY_IGNORE] = 0
+        _paint()
+
+    return on_decision, on_frame, overlay
 
 
 def _frame_capture(out: Path, every: int):
@@ -205,7 +229,7 @@ def main(argv=None):
     p.add_argument(
         "--overlay",
         action="store_true",
-        help="the 1080x1350 window beside the game; slower on purpose, never the headline",
+        help="one 1080x1350 window: game on top, live debug / Jev bars below",
     )
     p.add_argument("--max-decisions", type=int, default=50)
     p.add_argument("--out")
@@ -218,6 +242,18 @@ def main(argv=None):
     p.add_argument("--state", help="save state to start from, eg red-bedroom.state")
     p.add_argument("--frames", help="dump the overlay over the live game here, as PNGs")
     p.add_argument("--every", type=int, default=2, help="capture 1 frame in N (60/N fps)")
+    p.add_argument(
+        "--overlay-fps",
+        type=int,
+        default=60,
+        help="pygame cap while --overlay is on; 60 is cartridge speed",
+    )
+    p.add_argument(
+        "--linger",
+        type=float,
+        default=0.0,
+        help="seconds to hold the bars after each Jev answer",
+    )
     p.set_defaults(func=cmd_play)
 
     p = sub.add_parser(
