@@ -37,7 +37,7 @@ def input_ready(state, button: str) -> bool:
     """
     if state.joy_ignore & S.BUTTON_BITS.get(button, 0):
         return False
-    return button in ("a", "b") or state.walk_counter == 0
+    return button in ("a", "b", "start") or state.walk_counter == 0
 
 
 class BattleLatch:
@@ -103,6 +103,12 @@ class Driver:
         return self.state
 
     def press(self, button: str):
+        if screen.modal_menu(self.emu.memory):
+            # Oak's speech leaves wJoyIgnore masking START and the d-pad, and nothing
+            # clears it while a modal menu owns the screen, so the submit or the cursor
+            # move is swallowed and the agent mashes A forever. The overlay already does
+            # this for a human taking the pad; the agent needs the same clear.
+            self.emu.memory[S.JOY_IGNORE] = 0
         before = self._where()
         self.emu.button(button, PRESS_FRAMES)
         state = self.tick()
@@ -187,11 +193,31 @@ def classify(driver: Driver, goal, waypoint) -> tuple[str, object]:
             st, goal, items=options.bag(driver.emu.memory), turn=driver.turn
         )
         return "branch", branch
+    if screen.naming_keyboard(driver.emu.memory):
+        # leftover wJoyIgnore from Oak's speech still masks START. Waiting for it
+        # deadlocks: the keyboard is up and the agent sits on wait.
+        return "press", "start"
     prompt = screen.yes_no_prompt(driver.emu.memory)
     if prompt:
         # a cursor is up and A would just take whatever it is sitting on, which said YES
         # to "give a nickname?" and then mashed the keyboard into AAAAAAAAAAAA
         return "branch", options.dialogue_branch(st, goal, prompt[0], prompt[1])
+    if screen.two_item_choice(driver.emu.memory):
+        # A two-option prompt whose words this charmap cannot render: a translated
+        # cartridge draws its own glyphs, so `yes_no_prompt` sees letter salad and the
+        # A-mash above would answer YES to everything, including the nickname, which
+        # lands on the keyboard and never comes back.
+        #
+        # Jev is not asked, deliberately: an unreadable question is not a judgment, and
+        # inventing an answer for it is worse than letting code own the two prompts the
+        # v0.1 route actually hits. Nothing in the party means the starter is being
+        # offered, so take it; a mon already caught means this is the nickname, so
+        # decline and keep its species name.
+        target = 1 if st.party else 0
+        cursor = driver.emu.memory[S.CURRENT_MENU_ITEM]
+        if cursor != target:
+            return "press", ("down" if target > cursor else "up")
+        return "press", "a"
     if st.font_loaded:
         # a text box with no cursor: A costs nothing. wFontLoaded, not wTextBoxID: the
         # latter holds the id of the last box drawn and never clears, so on a cartridge
@@ -200,11 +226,16 @@ def classify(driver: Driver, goal, waypoint) -> tuple[str, object]:
     step = route.next_step(st, waypoint)
     if step and not driver.blocked(step):
         return _press(st, step)
-    if waypoint and step is None and driver.heading:
+    if waypoint and step is None:
         # standing on the waypoint. Stairs warp the moment they are stepped on, but a
         # house door leaves the player on the mat and wants one more step through it,
-        # which is the direction that got us here.
-        return _press(st, driver.heading)
+        # which is the direction that got us here. A battle clears that heading, and the
+        # lab's mat is where the rival battle ends, so fall back to south when the tile
+        # is on the map's bottom row: that is where a building's warp always is.
+        bottom = 2 * driver.emu.memory[S.CUR_MAP_HEIGHT] - 1
+        push = driver.heading or ("down" if st.y >= bottom else None)
+        if push:
+            return _press(st, push)
     if step and route.distance(st, waypoint) == 1:
         # the waypoint is the next tile and it will not be walked onto: it is an object,
         # Oak or a poke ball. Walking into it already turned the player to face it.
@@ -233,8 +264,13 @@ def play(
     on_decision=None,
     max_ticks: int = 200_000,
     on_frame=None,
+    human=None,
 ) -> list[dict]:
-    """Run until the goal stack empties or `max_decisions` Jev calls have happened."""
+    """Run until the goal stack empties or `max_decisions` Jev calls have happened.
+
+    `human` is optional and duck-typed: `.taking_over` skips classify for the tick,
+    and `.take_pending()` is a list of Game Boy buttons to press instead.
+    """
     driver = Driver(emulator, on_frame=on_frame)
     stack = goals.GoalStack()
     records: list[dict] = []
@@ -245,6 +281,10 @@ def play(
             if len(records) >= max_decisions or stack.done:
                 break
             driver.tick()
+            if human is not None and human.taking_over:
+                for button in human.take_pending():
+                    driver.press(button)
+                continue
             stack.advance(driver.state, driver.latch)
             goal = stack.current
             if goal is None:

@@ -151,6 +151,104 @@ def test_a_battle_menu_is_a_branch_and_carries_the_legal_options():
     assert "use_move_ember" in branch.options
 
 
+def test_the_naming_keyboard_is_submitted_with_start_not_mashed_with_a():
+    """YES/NO on a Chinese tilemap is invisible, so A opened the keyboard and then
+    typed AAAAAAAAAAAA. Start submits; an empty buffer keeps the default species name."""
+    ram = make_ram.overworld()
+    ram[S.FONT_LOADED] = 0x01
+    ram[S.MAX_MENU_ITEM] = 7
+    ram[S.TOP_MENU_ITEM_Y] = 4  # the cursor's row on a cartridge, not the panel's
+    ram[S.TOP_MENU_ITEM_X] = 15
+    ram[S.MENU_WATCHED_KEYS] = 0xFF
+    driver = loop.Driver(FakeEmulator(ram))
+    driver.tick()
+    assert loop.classify(driver, goal("get_starter"), (12, 11)) == ("press", "start")
+
+
+def test_naming_start_is_not_blocked_by_leftover_joy_ignore():
+    """Oak's speech leaves START masked. Waiting for it deadlocks on the keyboard."""
+    ram = make_ram.overworld()
+    ram[S.FONT_LOADED] = 0x01
+    ram[S.MAX_MENU_ITEM] = 7
+    ram[S.TOP_MENU_ITEM_Y] = 4
+    ram[S.TOP_MENU_ITEM_X] = 15
+    ram[S.MENU_WATCHED_KEYS] = 0xFF
+    ram[S.JOY_IGNORE] = S.PAD_SELECT | S.PAD_START | S.PAD_CTRL_PAD
+    driver = loop.Driver(FakeEmulator(ram))
+    driver.tick()
+    assert loop.classify(driver, goal("get_starter"), (12, 11)) == ("press", "start")
+
+
+def test_an_unreadable_two_item_prompt_takes_the_starter_and_declines_the_nickname():
+    """A translated cartridge draws its own glyphs, so the question is letter salad.
+
+    Read off one: the words are unreadable but `wMaxMenuItem` 1 with A and B watched
+    still marks the prompt. Code owns these two, because an unreadable question is not a
+    judgment Jev can make. Empty party means the starter is on offer, so A takes it; a
+    mon already caught means this is the nickname, so the cursor moves to NO first.
+    """
+    empty = make_ram.bedroom()
+    empty[S.FONT_LOADED] = 0x01
+    empty[S.MAX_MENU_ITEM] = 1
+    empty[S.MENU_WATCHED_KEYS] = 0x03
+    empty[S.CURRENT_MENU_ITEM] = 0
+    driver = loop.Driver(FakeEmulator(empty))
+    driver.tick()
+    assert loop.classify(driver, goal("get_starter"), (6, 3)) == ("press", "a")
+
+    caught = make_ram.overworld()
+    caught[S.FONT_LOADED] = 0x01
+    caught[S.MAX_MENU_ITEM] = 1
+    caught[S.MENU_WATCHED_KEYS] = 0x03
+    caught[S.CURRENT_MENU_ITEM] = 0
+    driver = loop.Driver(FakeEmulator(caught))
+    driver.tick()
+    assert loop.classify(driver, goal("get_starter"), (6, 3)) == ("press", "down")
+    caught[S.CURRENT_MENU_ITEM] = 1
+    driver = loop.Driver(FakeEmulator(caught))
+    driver.tick()
+    assert loop.classify(driver, goal("get_starter"), (6, 3)) == ("press", "a")
+
+
+def test_a_readable_prompt_is_still_a_branch_not_a_coded_answer():
+    """The English path is untouched: words on screen still go to Jev."""
+    ram = make_ram.overworld()
+    ram[S.FONT_LOADED] = 0x01
+    ram[S.MAX_MENU_ITEM] = 1
+    ram[S.MENU_WATCHED_KEYS] = 0x03
+    for row, col, text in ((8, 16, "YES"), (10, 16, "NO"), (14, 1, "CHARMANDER?")):
+        for i, ch in enumerate(text):
+            code = 0xE6 if ch == "?" else 0x80 + ord(ch) - ord("A")
+            ram[S.TILE_MAP + row * 20 + col + i] = code
+    driver = loop.Driver(FakeEmulator(ram))
+    driver.tick()
+    action, branch = loop.classify(driver, goal("get_starter"), (6, 3))
+    assert action == "branch" and branch.kind == "dialogue"
+    assert set(branch.options) == {"answer_yes", "answer_no"}
+
+
+def test_a_human_pad_skips_the_agent():
+    ram = make_ram.battle()
+    ram[S.MAX_MENU_ITEM] = 3
+    emu = FakeEmulator(ram)
+
+    class Pad:
+        taking_over = True
+
+        def take_pending(self):
+            return ["a"]
+
+    records = loop.play(
+        emu,
+        policy.Policy(policy.JevClient(base_url="http://unused", api_key="test")),
+        max_decisions=3,
+        max_ticks=4,
+        human=Pad(),
+    )
+    assert records == []
+    assert emu.pressed == ["a"] * 4
+
+
 def test_a_text_box_with_no_cursor_costs_one_a_press():
     ram = make_ram.overworld()
     ram[S.FONT_LOADED] = 0x01

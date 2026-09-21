@@ -37,6 +37,30 @@ def test_a_yes_no_menu_is_read_off_the_screen_with_its_question():
     assert prompt == "give a nickname to CHARMANDER?"
 
 
+def test_the_naming_keyboard_is_the_displaynamingscreen_fingerprint():
+    """A on this screen types a letter. Start submits; empty name keeps the species."""
+    mem = _blank()
+    mem[S.MAX_MENU_ITEM] = 7
+    mem[S.MENU_WATCHED_KEYS] = 0xFF
+    assert screen.naming_keyboard(mem)
+    mem[S.MAX_MENU_ITEM] = 3  # leftover from the intro name list
+    assert screen.naming_keyboard(mem) is False
+
+
+def test_the_naming_keyboard_ignores_the_cursor_position():
+    """wTopMenuItemY/X are where the cursor is, not where the panel is.
+
+    Read off a cartridge: the X is 1, then 3, then 15 as the cursor walks the keyboard.
+    A fingerprint that pinned either one never fired, and the agent typed AAAAAA.
+    """
+    mem = _blank()
+    mem[S.MAX_MENU_ITEM] = 7
+    mem[S.MENU_WATCHED_KEYS] = 0xFF
+    for y, x in ((3, 1), (4, 1), (4, 15)):
+        mem[S.TOP_MENU_ITEM_Y], mem[S.TOP_MENU_ITEM_X] = y, x
+        assert screen.naming_keyboard(mem)
+
+
 def test_yes_inside_ordinary_dialogue_is_not_a_menu():
     """Both words have to be visible, or narration trips the detector."""
     mem = _blank()

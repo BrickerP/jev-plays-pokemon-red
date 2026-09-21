@@ -27,6 +27,7 @@ DIRECTIONS = ("up", "down", "left", "right")
 # leg on an event. (x, y) in map tile coordinates, the same units as wXCoord / wYCoord.
 OAK_TRIGGER = (10, 1)  # any tile with wYCoord == 1: that is the whole condition
 LAB_DOOR = (12, 11)
+LAB_EXIT_ROW = 11  # OaksLab.asm warp_event 4, 11 and 5, 11, the map's bottom row
 CHARMANDER_BALL = (6, 3)
 
 
@@ -66,6 +67,17 @@ def _oaks_lab(state) -> tuple[int, int]:
     return (5, 3)
 
 
+def _lab_door(state) -> tuple[int, int]:
+    """The lab's exit is both bottom-row tiles, so aim at the one under your feet.
+
+    The rival intercepts at the door, so winning leaves the player already standing on a
+    mat. Naming the other tile sends the agent sideways along the wall; naming this one
+    makes `classify` fall through to the step that actually leaves, which for a mat on
+    the map's bottom row is south.
+    """
+    return (state.x, LAB_EXIT_ROW) if state.y == LAB_EXIT_ROW else (5, LAB_EXIT_ROW)
+
+
 WAYPOINTS: dict[str, dict[int, object]] = {
     # RedsHouse2F.asm: warp_event 7, 1, REDS_HOUSE_1F, 3
     # RedsHouse1F.asm: warp_event 2, 7, LAST_MAP, 1
@@ -83,6 +95,11 @@ WAYPOINTS: dict[str, dict[int, object]] = {
         S.OAKS_LAB: (5, 11),
     },
     "reach_viridian": {
+        # the rival intercepts on the way to the door, so winning leaves the player still
+        # inside the lab. Without this leg `waypoint_for` returns None the moment the goal
+        # flips, `next_step` has nowhere to go, and `classify` falls through to pressing A
+        # forever: the run stalls where the battle ended.
+        S.OAKS_LAB: _lab_door,
         S.PALLET_TOWN: _pallet_north,
         S.ROUTE_1: (10, 0),
     },

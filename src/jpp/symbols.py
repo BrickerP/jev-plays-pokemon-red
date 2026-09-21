@@ -70,6 +70,7 @@ B_PP = 25  # ds NUM_MOVES
 # --- menus and input plumbing ---
 CURRENT_MENU_ITEM = 0xCC26  # wCurrentMenuItem
 MAX_MENU_ITEM = 0xCC28  # wMaxMenuItem
+MENU_WATCHED_KEYS = 0xCC29  # wMenuWatchedKeys
 TOP_MENU_ITEM_Y = 0xCC24  # wTopMenuItemY
 TOP_MENU_ITEM_X = 0xCC25  # wTopMenuItemX
 
@@ -100,6 +101,7 @@ PAD_CTRL_PAD = 0xF0
 BUTTON_BITS = {
     "a": PAD_A,
     "b": PAD_B,
+    "start": PAD_START,
     "up": PAD_UP,
     "down": PAD_DOWN,
     "left": PAD_LEFT,

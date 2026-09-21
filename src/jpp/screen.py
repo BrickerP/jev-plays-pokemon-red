@@ -43,3 +43,36 @@ def yes_no_prompt(mem) -> tuple[str, list[str]] | None:
         " ".join(w for w in word_list if w not in ("YES", "NO")) for word_list in words
     ).split()
     return " ".join(prompt), ["YES", "NO"]
+
+
+def two_item_choice(mem) -> bool:
+    """True when a two-option cursor menu is up, whatever language it is written in.
+
+    `yes_no_prompt` reads the words, which only works on an English cartridge. This is
+    the structural half: `DisplayTwoOptionMenu` leaves one item below the first and
+    watches A and B only. Measured on a translated cartridge, where the question renders
+    as letter salad through this charmap but these two bytes still hold for the whole
+    prompt.
+    """
+    return mem[S.MAX_MENU_ITEM] == 1 and mem[S.MENU_WATCHED_KEYS] == 0x03
+
+
+def modal_menu(mem) -> bool:
+    """A menu that owns the screen, so a leftover `wJoyIgnore` mask is stale."""
+    return naming_keyboard(mem) or two_item_choice(mem)
+
+
+def naming_keyboard(mem) -> bool:
+    """True when DisplayNamingScreen is up.
+
+    A types the letter under the cursor and Start submits; an empty buffer keeps the
+    default species name. The YES/NO detector has no question to read here, so this is
+    the escape from mashing A and typing AAAAAA into the name.
+
+    Measured on a cartridge: max item 7 and every button watched hold for the whole
+    screen, but wTopMenuItemY and wTopMenuItemX are the cursor's own row and column, not
+    the panel origin: the X reads 1, 3, then 15 as the cursor walks the grid. Pinning
+    either one was the bug that left the agent typing instead of submitting. The intro
+    name list leaves the max item at 3 and does not match.
+    """
+    return mem[S.MAX_MENU_ITEM] == 7 and mem[S.MENU_WATCHED_KEYS] == 0xFF
