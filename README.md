@@ -1,5 +1,7 @@
 # jev-plays-pokemon-red
 
+[![CI](https://github.com/BrickerP/jev-plays-pokemon-red/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/BrickerP/jev-plays-pokemon-red/actions/workflows/ci.yml)
+
 Pokemon Red played by [Jev](https://typesafe.ai), a model that only outputs probabilities.
 
 Code reads the Game Boy's RAM into a typed snapshot, works out which actions are legal
@@ -152,6 +154,8 @@ uv run jpp probe --rom "$POKEMON_ROM"  # walk by hand, watch the decoded state
 uv run jpp state --ram fixtures/ram_battle.bin   # the exact request body for a branch
 uv run measure runs/run.jsonl          # Brier, decisions/sec and $/hour for a run
 ```
+
+GitHub Actions runs that same pytest command on Python 3.12 and 3.13. It does not set `POKEMON_ROM` or `TYPESAFE_API_KEY`, so the ROM smoke tests stay skipped.
 
 The three ROM tests skip unless you point them at a cartridge:
 
